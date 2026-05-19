@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import Plot from 'react-plotly.js'
+import _PlotImport from 'react-plotly.js'
+const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
 import { Link, useNavigate } from 'react-router-dom'
 import { CLASS_COLORS, fmt } from '@/lib/format'
 import MetricCard, { type AnchorRow } from '@/components/cards/MetricCard'

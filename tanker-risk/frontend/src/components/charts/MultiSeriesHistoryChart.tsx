@@ -1,4 +1,5 @@
-import Plot from 'react-plotly.js'
+import _PlotImport from 'react-plotly.js'
+const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
 import { CLASS_COLORS } from '@/lib/format'
 
 type Point = { week_ending: string; [cls: string]: string | number }

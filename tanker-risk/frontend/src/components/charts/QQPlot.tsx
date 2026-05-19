@@ -1,4 +1,5 @@
-import Plot from 'react-plotly.js'
+import _PlotImport from 'react-plotly.js'
+const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
 
 export default function QQPlot({ samples, label }: { samples: number[]; label: string }) {
   if (!samples.length) return null

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Plot from 'react-plotly.js'
+import _PlotImport from 'react-plotly.js'
+const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
 import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/api/client'

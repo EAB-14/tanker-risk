@@ -1,4 +1,5 @@
-import Plot from 'react-plotly.js'
+import _PlotImport from 'react-plotly.js'
+const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
 
 type Props = {
   data: [string, number | null][]

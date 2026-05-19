@@ -1,4 +1,5 @@
-import Plot from 'react-plotly.js'
+import _PlotImport from 'react-plotly.js'
+const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
 
 type Props = {
   quantiles: number[][] // [p05, p25, p50, p75, p95] each length = weeks
