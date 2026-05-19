@@ -10,9 +10,6 @@ import { Toaster } from './components/Toast'
 
 const NAV = [
   { to: '/input',      label: 'Input' },
-  { to: '/vessels',    label: 'Vessels' },
-  { to: '/fleet',      label: 'Fleet Profile' },
-  { to: '/debt',       label: 'Debt' },
   { to: '/irr',        label: 'Performance' },
   { to: '/simulation', label: 'Risk' },
   { to: '/output',     label: 'Output' },

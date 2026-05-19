@@ -22,6 +22,7 @@ type Props = {
   vesselIds: string[]
   onVesselIdsChange: (next: string[]) => void
   readOnly?: boolean
+  controlsOnly?: boolean
 }
 
 function toCreate(v: Vessel): VesselCreate {
@@ -42,7 +43,7 @@ function toCreate(v: Vessel): VesselCreate {
   }
 }
 
-export default function FleetMatrix({ vesselIds, onVesselIdsChange, readOnly = false }: Props) {
+export default function FleetMatrix({ vesselIds, onVesselIdsChange, readOnly = false, controlsOnly = false }: Props) {
   const qc = useQueryClient()
   const toast = useToast()
   const { byId, vessels: allVessels, isLoading } = useVesselsById()
@@ -133,6 +134,51 @@ export default function FleetMatrix({ vesselIds, onVesselIdsChange, readOnly = f
     () => allVessels.filter((v) => !vesselIds.includes(v.id)),
     [allVessels, vesselIds],
   )
+
+  if (controlsOnly) {
+    return (
+      <div className="panel">
+        <div className="panel-header flex items-center justify-between flex-wrap gap-3">
+          <span>Fleet composition</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 border border-ink-200 rounded-btn pl-2 pr-1 py-0.5 bg-white">
+              <select
+                className="bg-transparent text-xs py-1 px-1 outline-none cursor-pointer"
+                value={addClass}
+                onChange={(e) => setAddClass(e.target.value)}
+              >
+                {ALL_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <button type="button" className="btn-primary btn-sm normal-case tracking-normal"
+                onClick={() => createMut.mutate(addClass)} disabled={createMut.isPending}
+                title="Create a new vessel of this class and add it to the fleet">
+                {createMut.isPending ? '…' : '+ Create vessel'}
+              </button>
+            </div>
+            <button type="button" className="btn-ghost btn-sm normal-case tracking-normal"
+              onClick={() => setShowPicker((s) => !s)} disabled={availableForPicker.length === 0}
+              title={availableForPicker.length === 0 ? 'All registry vessels are already in this fleet' : 'Add an existing vessel'}>
+              + From registry ({availableForPicker.length})
+            </button>
+          </div>
+        </div>
+        {showPicker && availableForPicker.length > 0 && (
+          <div className="px-4 py-3 border-b border-ink-200 bg-ink-50/40">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-ink-500 mb-2">Pick from registry</div>
+            <div className="flex flex-wrap gap-2">
+              {availableForPicker.map((v) => (
+                <button key={v.id} type="button" onClick={() => addFromRegistry(v.id)}
+                  className="px-2 py-1 text-[12px] border border-ink-200 rounded hover:border-accent-400 hover:bg-white">
+                  <span className="font-medium text-ink-900">{v.name}</span>
+                  <span className="text-ink-400 ml-1.5">· {v.vessel_class} · {v.purchase_date}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="panel">

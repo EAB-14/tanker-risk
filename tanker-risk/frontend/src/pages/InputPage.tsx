@@ -1,6 +1,7 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import * as XLSX from 'xlsx'
 import { api } from '@/api/client'
 import FleetMatrix from '@/components/fleet/FleetMatrix'
 import FleetSettingsPanel from '@/components/fleet/FleetSettingsPanel'
@@ -10,8 +11,9 @@ import { CLASS_COLORS, fmt } from '@/lib/format'
 import { useAppStore } from '@/lib/store'
 import { useVesselsById } from '@/lib/useVessels'
 import { useRunSimulation } from '@/lib/useRunSimulation'
+import { useToast } from '@/lib/useToast'
 import { annualRevenueForVesselYear, currentYear, opexForVesselYear, purchaseYearOf } from '@/lib/vesselDefaults'
-import type { IrrDebtAmortStyle, IrrDebtConfig, Vessel } from '@/types/api'
+import type { FleetProfile, IrrDebtAmortStyle, IrrDebtConfig, Vessel } from '@/types/api'
 
 const AMORT_STYLES: { value: IrrDebtAmortStyle; label: string }[] = [
   { value: 'level-payment', label: 'Level payment' },
@@ -20,22 +22,111 @@ const AMORT_STYLES: { value: IrrDebtAmortStyle; label: string }[] = [
   { value: 'balloon',       label: 'Balloon' },
 ]
 
-export default function InputPage() {
-  const profile      = useAppStore((s) => s.fleetProfile)
-  const setProfile   = useAppStore((s) => s.setFleetProfile)
-  const simConfig    = useAppStore((s) => s.simConfig)
-  const setSimConfig = useAppStore((s) => s.setSimConfig)
-  const navigate     = useNavigate()
+function isValidProfile(obj: unknown): obj is FleetProfile {
+  if (!obj || typeof obj !== 'object') return false
+  const p = obj as Record<string, unknown>
+  return p.schemaVersion === 6 && Array.isArray(p.vesselIds) && typeof p.debt === 'object'
+}
 
-  const scenarios = useQuery({ queryKey: ['scenarios'], queryFn: api.listScenarios })
-  const { byId: vesselsById } = useVesselsById()
+const DEBT_KEYS = ['enabled','sizing','ltv_pct','loan_amount_usd','interest_pct','tenor_years','style','balloon_pct']
+function looksLikeDebt(obj: unknown): obj is Partial<IrrDebtConfig> {
+  return typeof obj === 'object' && obj !== null && DEBT_KEYS.some((k) => k in (obj as Record<string, unknown>))
+}
+
+function parseFleetExcel(buf: ArrayBuffer, allVessels: Vessel[]): FleetProfile | null {
+  try {
+    const wb = XLSX.read(buf, { type: 'array' })
+    const settingsSheet = wb.Sheets['Settings']
+    if (!settingsSheet) return null
+
+    const rows: Array<{ Setting?: unknown; Value?: unknown }> = XLSX.utils.sheet_to_json(settingsSheet)
+    const kv: Record<string, unknown> = {}
+    for (const row of rows) { if (row.Setting != null) kv[String(row.Setting)] = row.Value }
+
+    const nameToId: Record<string, string> = {}
+    for (const v of allVessels) nameToId[v.name.toLowerCase()] = v.id
+
+    let vesselIds: string[] = []
+    const vesselSheet = wb.Sheets['Vessels']
+    if (vesselSheet) {
+      const vrows: Array<Record<string, unknown>> = XLSX.utils.sheet_to_json(vesselSheet)
+      vesselIds = vrows
+        .map((r) => nameToId[String(r['Name'] ?? '').toLowerCase()])
+        .filter((id): id is string => Boolean(id))
+    }
+
+    return {
+      schemaVersion: 6,
+      name: String(kv['Profile name'] ?? 'Imported fleet'),
+      vesselIds,
+      discountPct: Number(kv['Discount rate'] ?? 0.08),
+      targetIrrPct: Number(kv['Target IRR'] ?? 0.12),
+      debt: {
+        enabled: kv['Debt enabled'] === 'Yes',
+        sizing: (String(kv['Debt sizing'] ?? 'ltv')) as 'ltv' | 'amount',
+        loan_amount_usd: Number(kv['Loan amount (USD)'] ?? 0),
+        ltv_pct: Number(kv['LTV (%)'] ?? 0.6),
+        interest_pct: Number(kv['Interest rate'] ?? 0.06),
+        tenor_years: Number(kv['Tenor (years)'] ?? 10),
+        style: (String(kv['Amort style'] ?? 'level-payment')) as IrrDebtAmortStyle,
+        balloon_pct: Number(kv['Balloon (%)'] ?? 0),
+      },
+    }
+  } catch { return null }
+}
+
+function parseDebtExcel(buf: ArrayBuffer): Partial<IrrDebtConfig> | null {
+  try {
+    const wb = XLSX.read(buf, { type: 'array' })
+    const sheetName = wb.SheetNames.includes('Settings') ? 'Settings' : wb.SheetNames[0]
+    if (!sheetName) return null
+
+    const rows: Array<Record<string, unknown>> = XLSX.utils.sheet_to_json(wb.Sheets[sheetName])
+    const kv: Record<string, unknown> = {}
+    for (const row of rows) {
+      const keys = Object.keys(row)
+      if (keys.length >= 2) kv[String(row[keys[0]] ?? '')] = row[keys[1]]
+    }
+
+    const debt: Partial<IrrDebtConfig> = {}
+    if ('Debt enabled'      in kv) debt.enabled          = kv['Debt enabled'] === 'Yes'
+    if ('Debt sizing'       in kv) debt.sizing            = kv['Debt sizing'] as 'ltv' | 'amount'
+    if ('Loan amount (USD)' in kv) debt.loan_amount_usd   = Number(kv['Loan amount (USD)'])
+    if ('LTV (%)'           in kv) debt.ltv_pct           = Number(kv['LTV (%)'])
+    if ('Interest rate'     in kv) debt.interest_pct      = Number(kv['Interest rate'])
+    if ('Tenor (years)'     in kv) debt.tenor_years       = Number(kv['Tenor (years)'])
+    if ('Amort style'       in kv) debt.style             = kv['Amort style'] as IrrDebtAmortStyle
+    if ('Balloon (%)'       in kv) debt.balloon_pct       = Number(kv['Balloon (%)'])
+    return Object.keys(debt).length > 0 ? debt : null
+  } catch { return null }
+}
+
+export default function InputPage() {
+  const profile        = useAppStore((s) => s.fleetProfile)
+  const setProfile     = useAppStore((s) => s.setFleetProfile)
+  const replaceProfile = useAppStore((s) => s.replaceFleetProfile)
+  const simConfig      = useAppStore((s) => s.simConfig)
+  const setSimConfig   = useAppStore((s) => s.setSimConfig)
+  const navigate       = useNavigate()
+  const toast          = useToast()
+
+  const scenarios     = useQuery({ queryKey: ['scenarios'],       queryFn: api.listScenarios })
+  const savedProfiles = useQuery({ queryKey: ['fleet-profiles'],  queryFn: api.listFleetProfiles })
+  const { byId: vesselsById, vessels: allVessels } = useVesselsById()
   const { run, isPending } = useRunSimulation({ onDone: () => navigate('/output') })
+
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    fleet: false, vessels: false, settings: false, debt: false, simulation: false,
+    fleet: false, settings: false, debt: false, simulation: false,
   })
-  const toggleSection = useCallback((key: string) =>
-    setOpenSections((s) => ({ ...s, [key]: !s[key] })), [])
+  const toggleSection = useCallback(
+    (key: string) => setOpenSections((s) => ({ ...s, [key]: !s[key] })),
+    [],
+  )
+
+  const fleetFileRef = useRef<HTMLInputElement>(null)
+  const debtFileRef  = useRef<HTMLInputElement>(null)
+  const [debtMsg, setDebtMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   const fleetVessels = useMemo(
     () => profile.vesselIds.flatMap((id) => (vesselsById[id] ? [vesselsById[id]] : [])),
@@ -54,13 +145,79 @@ export default function InputPage() {
   }, [fleetVessels])
 
   const debt = profile.debt
-  function setDebt(patch: Partial<IrrDebtConfig>) {
-    setProfile({ debt: { ...debt, ...patch } })
-  }
+  function setDebt(patch: Partial<IrrDebtConfig>) { setProfile({ debt: { ...debt, ...patch } }) }
 
   function toggleScenario(id: number) {
     const sel = simConfig.selectedScenarios
     setSimConfig({ selectedScenarios: sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id] })
+  }
+
+  // ── Fleet loaders ──
+  function handleLoadProfile(id: string) {
+    if (!id) return
+    api.getFleetProfile(Number(id))
+      .then((saved: any) => {
+        if (!isValidProfile(saved.payload)) { toast.error('Load failed', 'Not a valid v6 profile.'); return }
+        replaceProfile(saved.payload)
+        toast.success('Loaded', `"${saved.name}" loaded.`)
+      })
+      .catch((err) => toast.error('Load failed', err instanceof Error ? err.message : String(err)))
+  }
+
+  function handleImportFleet(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; e.target.value = ''
+    if (!f) return
+    const isExcel = /\.(xlsx|xls)$/i.test(f.name)
+    const reader = new FileReader()
+    if (isExcel) {
+      reader.onload = () => {
+        const parsed = parseFleetExcel(reader.result as ArrayBuffer, allVessels)
+        if (!parsed) { toast.error('Import failed', 'Could not read Excel — ensure the file was exported from this app.'); return }
+        replaceProfile(parsed)
+        const n = parsed.vesselIds.length
+        toast.success('Imported', `"${parsed.name}" loaded${n ? ` · ${n} vessel${n !== 1 ? 's' : ''} matched` : ' · no vessels matched'}.`)
+      }
+      reader.readAsArrayBuffer(f)
+    } else {
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(String(reader.result))
+          if (!isValidProfile(data)) { toast.error('Import failed', 'Not a valid v6 Fleet Profile.'); return }
+          replaceProfile(data)
+          toast.success('Imported', `"${data.name}" loaded.`)
+        } catch (err) { toast.error('Import failed', err instanceof Error ? err.message : String(err)) }
+      }
+      reader.readAsText(f)
+    }
+  }
+
+  // ── Debt loader ──
+  function handleImportDebt(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; e.target.value = ''
+    if (!f) return
+    const isExcel = /\.(xlsx|xls)$/i.test(f.name)
+    const reader = new FileReader()
+    if (isExcel) {
+      reader.onload = () => {
+        const parsed = parseDebtExcel(reader.result as ArrayBuffer)
+        if (!parsed) { setDebtMsg({ ok: false, text: 'No debt fields found in Excel file.' }); return }
+        setProfile({ debt: { ...debt, ...parsed } })
+        setDebtMsg({ ok: true, text: 'Debt config applied.' })
+        setTimeout(() => setDebtMsg(null), 3000)
+      }
+      reader.readAsArrayBuffer(f)
+    } else {
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(String(reader.result))
+          if (!looksLikeDebt(data)) { setDebtMsg({ ok: false, text: 'No recognised debt fields found.' }); return }
+          setProfile({ debt: { ...debt, ...data } })
+          setDebtMsg({ ok: true, text: 'Debt config applied.' })
+          setTimeout(() => setDebtMsg(null), 3000)
+        } catch { setDebtMsg({ ok: false, text: 'Could not parse file.' }) }
+      }
+      reader.readAsText(f)
+    }
   }
 
   return (
@@ -71,45 +228,96 @@ export default function InputPage() {
         <h1 className="font-display text-[22px] text-ink-900">Inputs</h1>
       </div>
 
+      {/* ── Loader cards ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        {/* Fleet profile loader */}
+        <div className="panel">
+          <div className="panel-header text-[11px]">Load fleet profile</div>
+          <div className="panel-body space-y-2">
+            <select
+              className="field-select text-[12px] w-full"
+              value=""
+              onChange={(e) => handleLoadProfile(e.target.value)}
+            >
+              <option value="">📁 Select saved profile…</option>
+              {savedProfiles.isLoading && <option disabled>Loading…</option>}
+              {savedProfiles.data?.map((p: any) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.n_vessels} vessel{p.n_vessels !== 1 ? 's' : ''})
+                </option>
+              ))}
+            </select>
+            <button type="button"
+              className="btn-ghost btn-sm normal-case tracking-normal w-full text-left"
+              onClick={() => fleetFileRef.current?.click()}>
+              ⇧ Load fleet file
+            </button>
+            <input ref={fleetFileRef} type="file" accept=".json,.xlsx,.xls,application/json"
+              className="hidden" onChange={handleImportFleet} />
+          </div>
+        </div>
+
+        {/* Debt config loader */}
+        <div className="panel">
+          <div className="panel-header text-[11px]">Load debt configuration</div>
+          <div className="panel-body space-y-2">
+            <button type="button"
+              className="btn-ghost btn-sm normal-case tracking-normal w-full text-left"
+              onClick={() => { setDebtMsg(null); debtFileRef.current?.click() }}>
+              ⇧ Load debt file
+            </button>
+            {debtMsg && (
+              <p className={`text-[11px] ${debtMsg.ok ? 'text-positive' : 'text-danger'}`}>
+                {debtMsg.text}
+              </p>
+            )}
+            <input ref={debtFileRef} type="file" accept=".json,.xlsx,.xls,application/json"
+              className="hidden" onChange={handleImportDebt} />
+          </div>
+        </div>
+
+      </div>
+
       {/* ─────────────────────────────────────────────
-          1 · Fleet composition
+          1 · Fleet & vessels
       ───────────────────────────────────────────── */}
       <section>
-        <SectionToggle label="1 · Fleet composition" open={openSections.fleet} onToggle={() => toggleSection('fleet')} />
+        <SectionToggle label="1 · Fleet" open={openSections.fleet} onToggle={() => toggleSection('fleet')} />
         {openSections.fleet && (
-          <FleetMatrix
-            vesselIds={profile.vesselIds}
-            onVesselIdsChange={(next) => setProfile({ vesselIds: next })}
-          />
+          <div className="space-y-2">
+            <FleetMatrix
+              vesselIds={profile.vesselIds}
+              onVesselIdsChange={(next) => setProfile({ vesselIds: next })}
+              controlsOnly
+            />
+            {fleetVessels.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-title">No vessels in this fleet yet</div>
+                <div className="text-xs text-ink-500">Use + Create vessel or + From registry above.</div>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {fleetVessels.map((v) => (
+                  <VesselAccordion
+                    key={v.id}
+                    vessel={v}
+                    expanded={expandedId === v.id}
+                    onToggle={() => setExpandedId((cur) => (cur === v.id ? null : v.id))}
+                    onRemove={() => setProfile({ vesselIds: profile.vesselIds.filter((id) => id !== v.id) })}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </section>
 
       {/* ─────────────────────────────────────────────
-          2 · Per-vessel parameters
-      ───────────────────────────────────────────── */}
-      {fleetVessels.length > 0 && (
-        <section>
-          <SectionToggle label="2 · Vessel parameters" open={openSections.vessels} onToggle={() => toggleSection('vessels')} />
-          {openSections.vessels && (
-            <div className="space-y-2">
-              {fleetVessels.map((v) => (
-                <VesselAccordion
-                  key={v.id}
-                  vessel={v}
-                  expanded={expandedId === v.id}
-                  onToggle={() => setExpandedId((cur) => (cur === v.id ? null : v.id))}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* ─────────────────────────────────────────────
-          3 · Analysis settings
+          2 · Analysis settings
       ───────────────────────────────────────────── */}
       <section>
-        <SectionToggle label="3 · Analysis settings" open={openSections.settings} onToggle={() => toggleSection('settings')} />
+        <SectionToggle label="2 · Analysis settings" open={openSections.settings} onToggle={() => toggleSection('settings')} />
         {openSections.settings && (
           <FleetSettingsPanel
             profile={profile}
@@ -120,35 +328,27 @@ export default function InputPage() {
       </section>
 
       {/* ─────────────────────────────────────────────
-          4 · Debt financing
+          3 · Debt financing
       ───────────────────────────────────────────── */}
       <section>
-        <SectionToggle label="4 · Debt financing" open={openSections.debt} onToggle={() => toggleSection('debt')} />
+        <SectionToggle label="3 · Debt financing" open={openSections.debt} onToggle={() => toggleSection('debt')} />
         {openSections.debt && (
           <div className="panel">
             <div className="panel-body space-y-5">
 
-              {/* Enable toggle */}
               <label className="flex items-center gap-2.5 text-[13px] text-ink-900 font-medium cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="accent-accent-500 w-4 h-4"
-                  checked={debt.enabled}
-                  onChange={(e) => setDebt({ enabled: e.target.checked })}
-                />
+                <input type="checkbox" className="accent-accent-500 w-4 h-4"
+                  checked={debt.enabled} onChange={(e) => setDebt({ enabled: e.target.checked })} />
                 Enable debt financing
               </label>
 
-              {/* Fields */}
               <div className={`grid grid-cols-2 md:grid-cols-4 gap-4 ${!debt.enabled ? 'opacity-40 pointer-events-none' : ''}`}>
 
-                {/* Sizing */}
                 <div>
                   <label className="field-label">Sizing method</label>
                   <div className="toggle-group w-full">
                     {(['ltv', 'amount'] as const).map((s) => (
-                      <button key={s} type="button"
-                        onClick={() => setDebt({ sizing: s })}
+                      <button key={s} type="button" onClick={() => setDebt({ sizing: s })}
                         className={`flex-1 toggle-btn normal-case tracking-normal ${debt.sizing === s ? 'toggle-btn-active' : ''}`}>
                         {s === 'ltv' ? 'LTV %' : 'Amount $'}
                       </button>
@@ -156,7 +356,6 @@ export default function InputPage() {
                   </div>
                 </div>
 
-                {/* LTV or amount */}
                 {debt.sizing === 'ltv' ? (
                   <div>
                     <label className="field-label flex items-center justify-between">
@@ -176,7 +375,6 @@ export default function InputPage() {
                   </div>
                 )}
 
-                {/* Interest rate */}
                 <div>
                   <label className="field-label">Interest rate (% / yr)</label>
                   <div className="relative">
@@ -187,7 +385,6 @@ export default function InputPage() {
                   </div>
                 </div>
 
-                {/* Tenor */}
                 <div>
                   <label className="field-label">Tenor (years)</label>
                   <input type="number" className="field-input"
@@ -195,7 +392,6 @@ export default function InputPage() {
                     onChange={(e) => setDebt({ tenor_years: Math.max(1, Math.round(Number(e.target.value))) })} />
                 </div>
 
-                {/* Amortization style */}
                 <div className="md:col-span-2">
                   <label className="field-label">Amortization style</label>
                   <div className="flex items-center gap-3">
@@ -226,10 +422,10 @@ export default function InputPage() {
       </section>
 
       {/* ─────────────────────────────────────────────
-          5 · Risk simulation
+          4 · Risk simulation
       ───────────────────────────────────────────── */}
       <section>
-        <SectionToggle label="5 · Risk simulation settings" open={openSections.simulation} onToggle={() => toggleSection('simulation')} />
+        <SectionToggle label="4 · Risk simulation settings" open={openSections.simulation} onToggle={() => toggleSection('simulation')} />
         {openSections.simulation && (
           <div className="panel">
             <div className="panel-body space-y-4">
@@ -246,8 +442,7 @@ export default function InputPage() {
                           on ? 'bg-accent-600 text-white border-accent-600'
                              : 'border-ink-300 text-ink-700 hover:border-accent-400 hover:text-accent-700'
                         }`}
-                        title={s.description ?? ''}
-                      >
+                        title={s.description ?? ''}>
                         {s.name}
                       </button>
                     )
@@ -292,7 +487,11 @@ function SectionToggle({ label, open, onToggle }: { label: string; open: boolean
 }
 
 /* ── Vessel accordion ── */
-function VesselAccordion({ vessel, expanded, onToggle }: { vessel: Vessel; expanded: boolean; onToggle: () => void }) {
+function VesselAccordion({
+  vessel, expanded, onToggle, onRemove,
+}: {
+  vessel: Vessel; expanded: boolean; onToggle: () => void; onRemove: () => void
+}) {
   const accent   = CLASS_COLORS[vessel.vessel_class] ?? '#9aa3b2'
   const saleYear = currentYear() + vessel.holding_years - 1
 
@@ -310,16 +509,24 @@ function VesselAccordion({ vessel, expanded, onToggle }: { vessel: Vessel; expan
   return (
     <div className={`border border-ink-200 rounded-card overflow-hidden ${expanded ? 'shadow-panel' : ''}`}
       style={{ borderLeftColor: accent, borderLeftWidth: 3 }}>
-      <button type="button" onClick={onToggle}
-        className="w-full flex items-center gap-3 px-4 py-2.5 text-left bg-white hover:bg-ons-50/40 transition-colors">
-        <span className="text-[13px] font-semibold text-ink-900">{vessel.name}</span>
-        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-white"
-          style={{ background: accent }}>{vessel.vessel_class}</span>
-        <span className="text-[11px] text-ink-500">{vessel.holding_years}y · sale {saleYear}</span>
-        <span className="text-[11px] text-ink-400 num">{fmt.usdCompact(stats.avgRev)}/yr</span>
-        {stats.margin != null && <span className="text-[11px] text-ink-400">{(stats.margin * 100).toFixed(0)}% margin</span>}
-        <span className="ml-auto text-ink-400 text-[11px]">{expanded ? '▼' : '▶'}</span>
-      </button>
+      {/* Row: clickable toggle area + remove button side by side */}
+      <div className="flex items-center bg-white hover:bg-ons-50/40 transition-colors">
+        <button type="button" onClick={onToggle}
+          className="flex-1 flex items-center gap-3 px-4 py-2.5 text-left min-w-0">
+          <span className="text-[13px] font-semibold text-ink-900 truncate">{vessel.name}</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded text-white shrink-0"
+            style={{ background: accent }}>{vessel.vessel_class}</span>
+          <span className="text-[11px] text-ink-500 shrink-0">{vessel.holding_years}y · sale {saleYear}</span>
+          <span className="text-[11px] text-ink-400 num shrink-0">{fmt.usdCompact(stats.avgRev)}/yr</span>
+          {stats.margin != null && (
+            <span className="text-[11px] text-ink-400 shrink-0">{(stats.margin * 100).toFixed(0)}% margin</span>
+          )}
+          <span className="text-ink-400 text-[11px] shrink-0 ml-1">{expanded ? '▼' : '▶'}</span>
+        </button>
+        <button type="button"
+          className="px-3 py-2.5 text-ink-300 hover:text-danger text-[14px] shrink-0"
+          onClick={onRemove} title="Remove from fleet">✕</button>
+      </div>
       {expanded && <VesselDetailEditor vessel={vessel} />}
     </div>
   )
