@@ -1,0 +1,66 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# Logs
+.logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── DATA FILES — NEVER COMMIT ──────────────────────────────────────────────
+# Databases (any format, any subdirectory)
+*.db
+*.sqlite
+*.sqlite3
+# Belt-and-suspenders: explicit path
+tanker-risk/backend/data/*.db
+tanker-risk/backend/data/**/*.db
+
+# Simulation run data (Parquet, CSV exports, HDF5)
+*.parquet
+*.h5
+*.hdf5
+
+# TCE rate spreadsheets (contain proprietary market data)
+tce rates.xlsx
+*tce*.xlsx
+*TCE*.xlsx
+# ───────────────────────────────────────────────────────────────────────────
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Claude
+.claude/
