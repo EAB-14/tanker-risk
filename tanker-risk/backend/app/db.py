@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-DB_DIR = Path(__file__).resolve().parent.parent / "data"
+_data_dir_env = os.environ.get("TANKER_DATA_DIR")
+if _data_dir_env:
+    DB_DIR = Path(_data_dir_env)
+else:
+    DB_DIR = Path(__file__).resolve().parent.parent / "data"
+
 DB_PATH = DB_DIR / "vlcc.db"
 VESSEL_PHOTOS_DIR = DB_DIR / "vessel_photos"
 

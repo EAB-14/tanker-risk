@@ -62,28 +62,33 @@ export default function OutputPage() {
     return { p5: at(5), p50: at(50), p95: at(95), probAbove, cvar5, n }
   }, [lastMcIrrs, profile.targetIrrPct])
 
-  // Scenario IRRs derived from the last simulation's scenario_runs
+  // Scenario impacts derived from the last simulation's scenario_runs
   const maxHoldingYears = useMemo(
     () => fleetVessels.reduce((m, v) => Math.max(m, v.holding_years), 0),
     [fleetVessels],
   )
-  const scenarioIrrs = useMemo(() => {
+  const scenarioImpacts = useMemo(() => {
     const runs = (lastSimulation as any)?.scenario_runs
     if (!runs || !Array.isArray(runs) || runs.length === 0) return []
     return runs.map((run: any) => {
       const name: string = run.scenario?.name ?? run.scenario_name ?? `Scenario ${run.run_id}`
+      // Correct path: fan_quantiles.class_tce[cls] is number[][], index 2 = median
+      const classTce: Record<string, number[][]> = run.fan_quantiles?.class_tce ?? {}
       const medianByClass: Record<string, number[]> = {}
-      for (const [cls, q] of Object.entries(run.fan_quantiles ?? {})) {
-        medianByClass[cls] = tceQuantileToYearly((q as any).p50 ?? [], maxHoldingYears)
+      for (const [cls, quantiles] of Object.entries(classTce)) {
+        const median = quantiles[2] ?? quantiles[Math.floor(quantiles.length / 2)] ?? []
+        medianByClass[cls] = tceQuantileToYearly(median, Math.max(maxHoldingYears, 1))
       }
       const stressed = applyMedianTce(fleetVessels, medianByClass)
       const b = assembleIrrCashflowsFromVessels({ vessels: stressed, debt: profile.debt })
       const proj = irr(b.project)
       const eq   = irr(b.equity)
+      const scenRevenue = b.perYear.reduce((s, r) => s + r.revenue, 0)
       return {
         name,
-        project: proj.ok ? proj.irr : null,
-        equity:  eq.ok  ? eq.irr  : null,
+        project:    proj.ok ? proj.irr : null,
+        equity:     eq.ok   ? eq.irr   : null,
+        revenue:    scenRevenue,
       }
     })
   }, [lastSimulation, fleetVessels, profile.debt, maxHoldingYears])
@@ -286,33 +291,39 @@ export default function OutputPage() {
         )}
 
         {/* Scenario stress tests */}
-        {scenarioIrrs.length > 0 ? (
+        {scenarioImpacts.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-[12px] num">
               <thead>
                 <tr className="border-b border-ink-100 bg-ink-50/40">
                   <th className="text-left px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">Scenario</th>
-                  <th className="text-right px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">Project IRR</th>
-                  {hasDebt && <th className="text-right px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">Equity IRR</th>}
-                  <th className="text-right px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">vs Base</th>
+                  <th className="text-right px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">Δ IRR</th>
+                  {hasDebt && <th className="text-right px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">Δ Equity IRR</th>}
+                  <th className="text-right px-4 py-2 text-[10px] uppercase tracking-[0.1em] text-ink-500 font-medium">Δ Revenue</th>
                 </tr>
               </thead>
               <tbody>
-                {scenarioIrrs.map((s, i) => {
-                  const delta = s.project != null && baseProjectIrr != null ? s.project - baseProjectIrr : null
+                {scenarioImpacts.map((s, i) => {
+                  const dIrr = s.project != null && baseProjectIrr != null ? s.project - baseProjectIrr : null
+                  const dEq  = s.equity  != null && equityIrrResult.ok    ? s.equity  - equityIrrResult.irr : null
+                  const dRev = s.revenue - totalRevenue
+                  const tone = (d: number | null) =>
+                    d == null ? '' : d < -0.0005 ? 'text-red-600' : d > 0.0005 ? 'text-emerald-700' : 'text-ink-500'
+                  const ppFmt = (d: number | null) =>
+                    d == null ? '—' : `${d >= 0 ? '+' : ''}${(d * 100).toFixed(1)}pp`
                   return (
                     <tr key={i} className="border-b border-ink-100 hover:bg-ink-50/50 print:hover:bg-transparent">
                       <td className="px-4 py-1.5 text-left font-medium text-ink-800">{s.name}</td>
-                      <td className="px-4 py-1.5 text-right">
-                        {s.project != null ? fmt.pct(s.project) : '—'}
+                      <td className={`px-4 py-1.5 text-right font-semibold ${tone(dIrr)}`}>
+                        {ppFmt(dIrr)}
                       </td>
                       {hasDebt && (
-                        <td className="px-4 py-1.5 text-right text-ink-600">
-                          {s.equity != null ? fmt.pct(s.equity) : '—'}
+                        <td className={`px-4 py-1.5 text-right font-semibold ${tone(dEq)}`}>
+                          {ppFmt(dEq)}
                         </td>
                       )}
-                      <td className={`px-4 py-1.5 text-right font-semibold ${delta == null ? '' : delta < 0 ? 'text-red-600' : 'text-emerald-700'}`}>
-                        {delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}pp`}
+                      <td className={`px-4 py-1.5 text-right font-semibold ${dRev < -1000 ? 'text-red-600' : dRev > 1000 ? 'text-emerald-700' : 'text-ink-500'}`}>
+                        {dRev >= 0 ? '+' : ''}{fmt.usdCompact(dRev)}
                       </td>
                     </tr>
                   )
@@ -323,8 +334,7 @@ export default function OutputPage() {
         ) : (
           <div className="px-5 py-2.5 text-[11px] text-ink-400 italic">
             No stress scenarios run yet — select scenarios on the{' '}
-            <a href="/input" className="text-accent-600 hover:underline">Input</a> page and run on{' '}
-            <a href="/simulation" className="text-accent-600 hover:underline">Risk</a>.
+            <a href="/input" className="text-accent-600 hover:underline">Input</a> page and run analysis.
           </div>
         )}
       </section>

@@ -4,6 +4,7 @@ Suezmax, estimate correlation. Use this to get a demo environment up quickly.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,7 +14,8 @@ from app.ingest.clarksons import ingest_clarksons_excel
 from app.models.base import fetch_class_levels
 from app.models.ou_jump import calibrate_ou_jump
 
-SOURCE = Path("/Users/sfloratos/Desktop/tce rates/tce rates.xlsx")
+_data_dir = os.environ.get("TANKER_DATA_DIR") or str(Path(__file__).resolve().parent.parent / "data")
+SOURCE = Path(_data_dir) / "tce rates.xlsx"
 
 
 def main() -> None:

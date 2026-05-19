@@ -9,6 +9,10 @@ FRONTEND="$ROOT/frontend"
 LOG_DIR="$ROOT/.logs"
 mkdir -p "$LOG_DIR"
 
+# ----- user data location (db, photos, simulation runs) -----
+export TANKER_DATA_DIR="C:/Tanker-database"
+mkdir -p "$TANKER_DATA_DIR"
+
 BACKEND_PORT=8000
 FRONTEND_PORT=5173
 BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}"
@@ -44,7 +48,7 @@ if [[ ! -f "$BACKEND/.venv/.deps_ok" ]]; then
 fi
 
 # Seed DB from the source file if the DB doesn't exist yet
-if [[ ! -f "$BACKEND/data/vlcc.db" ]]; then
+if [[ ! -f "$TANKER_DATA_DIR/vlcc.db" ]]; then
   info "seeding SQLite (ingest + calibrate VLCC/Suezmax)"
   (cd "$BACKEND" && PYTHONPATH=. .venv/bin/python scripts/seed_from_source.py)
 fi

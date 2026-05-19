@@ -10,6 +10,10 @@ set "FRONTEND=%ROOT%\frontend"
 set "LOG_DIR=%ROOT%\.logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
+REM ----- user data location (db, photos, simulation runs) -----
+set "TANKER_DATA_DIR=C:\Tanker-database"
+if not exist "%TANKER_DATA_DIR%" mkdir "%TANKER_DATA_DIR%"
+
 set "BACKEND_PORT=8000"
 set "FRONTEND_PORT=5173"
 set "BACKEND_URL=http://127.0.0.1:%BACKEND_PORT%"
@@ -55,7 +59,7 @@ if not exist "%BACKEND%\.venv\.deps_ok" (
 )
 
 REM ----- seed SQLite on first run -----
-if not exist "%BACKEND%\data\vlcc.db" (
+if not exist "%TANKER_DATA_DIR%\vlcc.db" (
   echo  - seeding SQLite ^(ingest + calibrate VLCC/Suezmax^)
   pushd "%BACKEND%"
   set "PYTHONPATH=."

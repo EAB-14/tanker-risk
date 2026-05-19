@@ -27,7 +27,9 @@ FAN_QUANTILES = [0.05, 0.25, 0.50, 0.75, 0.95]
 SAMPLE_PATH_COUNT = 20  # legacy default; overridable via run_simulation(n_sample_paths=...)
 
 # Location for persisted simulation paths (per run, wide-format parquet)
-RUNS_DIR = Path(__file__).resolve().parent.parent / "data" / "runs"
+import os as _os
+_tanker_data = _os.environ.get("TANKER_DATA_DIR")
+RUNS_DIR = (Path(_tanker_data) / "runs") if _tanker_data else (Path(__file__).resolve().parent.parent / "data" / "runs")
 
 
 def _load_calibration(cal_id: int) -> tuple[str, str, dict]:
