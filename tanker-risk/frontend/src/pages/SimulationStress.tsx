@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import _PlotImport from 'react-plotly.js'
-const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
+import Plot from '@/lib/Plot'
+
 import { useMutation } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '@/api/client'
@@ -106,9 +106,11 @@ function deterministicIrrFromTceMedians(
   vessels: Vessel[],
   debt: FleetProfile['debt'],
   medianTceByClass: Record<string, number[]>,
+  opexEscalationPct?: number,
+  opexEscalationStartYear?: number,
 ): { project: number | null; equity: number | null; minDscr: number | null; revenue: number } {
   const overridden = applyMedianTceToVessels(vessels, medianTceByClass)
-  const bundle = assembleIrrCashflowsFromVessels({ vessels: overridden, debt })
+  const bundle = assembleIrrCashflowsFromVessels({ vessels: overridden, debt, opexEscalationPct, opexEscalationStartYear })
   const proj = irr(bundle.project)
   const eq = irr(bundle.equity)
   const dscrs = bundle.perYear.filter((r) => r.dscr != null).map((r) => r.dscr as number)
@@ -216,6 +218,8 @@ export default function SimulationStress() {
     const msg: IrrWorkerRequest = {
       vessels,
       debt: profile.debt,
+      opexEscalationPct: profile.opexEscalationPct,
+      opexEscalationStartYear: profile.opexEscalationStartYear,
       tcePathsByClass: result.path_samples.tce,
     }
     worker.postMessage(msg)
@@ -248,7 +252,7 @@ export default function SimulationStress() {
       return out
     }
     if (baseResult) {
-      const base = deterministicIrrFromTceMedians(vessels, profile.debt, medianAnnualTce(baseResult))
+      const base = deterministicIrrFromTceMedians(vessels, profile.debt, medianAnnualTce(baseResult), profile.opexEscalationPct, profile.opexEscalationStartYear)
       rows.push({
         name: 'Base',
         scenario_id: null,
@@ -259,7 +263,7 @@ export default function SimulationStress() {
         mean_revenue: base.revenue,
       })
       for (const sc of scenarioResults) {
-        const r = deterministicIrrFromTceMedians(vessels, profile.debt, medianAnnualTce(sc))
+        const r = deterministicIrrFromTceMedians(vessels, profile.debt, medianAnnualTce(sc), profile.opexEscalationPct, profile.opexEscalationStartYear)
         rows.push({
           name: sc.scenario?.name ?? `Scenario #${sc.run_id}`,
           scenario_id: sc.scenario?.id ?? null,
@@ -273,20 +277,32 @@ export default function SimulationStress() {
       }
     }
     return rows
-  }, [baseResult, scenarioResults, vessels, profile.debt, maxHoldingYears])
+  }, [baseResult, scenarioResults, vessels, profile.debt, maxHoldingYears, profile.opexEscalationPct, profile.opexEscalationStartYear])
 
   const mcStats = useMemo(() => {
     if (mcIrrs.length === 0) return null
     const sorted = [...mcIrrs].sort((a, b) => a - b)
+    const n = sorted.length
+
+    // Winsorize at P2.5 / P97.5 to tame leverage-driven tail outliers.
+    // Values outside this band are pulled to the boundary before computing stats.
+    const loClip = sorted[Math.max(0, Math.floor(n * 0.025))]
+    const hiClip = sorted[Math.min(n - 1, Math.ceil(n * 0.975) - 1)]
+    const win = sorted.map((v) => Math.max(loClip, Math.min(hiClip, v)))
+
     const target = profile.targetIrrPct
-    const p5 = quantile(sorted, 0.05)
-    const p50 = quantile(sorted, 0.5)
-    const p95 = quantile(sorted, 0.95)
+    const p5 = quantile(win, 0.05)
+    const p50 = quantile(win, 0.5)
+    const p95 = quantile(win, 0.95)
+    const p99 = quantile(win, 0.99)
     const aboveTarget = sorted.filter((v) => v >= target).length
     const probTarget = aboveTarget / sorted.length
-    const cvarN = Math.max(1, Math.floor(sorted.length * 0.05))
-    const cvar = sorted.slice(0, cvarN).reduce((s, v) => s + v, 0) / cvarN
-    return { p5, p50, p95, probTarget, cvar, n: sorted.length }
+    const cvarN = Math.max(1, Math.floor(n * 0.05))
+    const cvar = win.slice(0, cvarN).reduce((s, v) => s + v, 0) / cvarN
+    const histMax = hiClip * 1.1
+    const histIrrs = mcIrrs.filter((v) => v <= histMax)
+    const histOutliers = mcIrrs.length - histIrrs.length
+    return { p5, p50, p95, p99, histMax, histIrrs, histOutliers, probTarget, cvar, n }
   }, [mcIrrs, profile.targetIrrPct])
 
   const calibrationLabel = useMemo(() => {
@@ -459,10 +475,10 @@ export default function SimulationStress() {
                 data={[
                   {
                     type: 'histogram',
-                    x: mcIrrs,
+                    x: mcStats.histIrrs, // clipped at P99×1.1; outliers shown in note below
                     nbinsx: 40,
                     marker: { color: chartColors.ink[600] },
-                    hovertemplate: 'IRR %{x:.2%}<br>Count %{y}<extra></extra>',
+                    hovertemplate: 'IRR %{x:.1%}<br>Count %{y}<extra></extra>',
                   } as any,
                 ]}
                 layout={{
@@ -473,7 +489,8 @@ export default function SimulationStress() {
                   bargap: 0.05,
                   xaxis: {
                     title: { text: 'Equity IRR' },
-                    tickformat: '.1%',
+                    tickformat: '.0%',
+                    range: [0, mcStats.histMax],
                     gridcolor: chartColors.ink[100],
                     zerolinecolor: chartColors.ink[300],
                     tickfont: { size: 11, color: chartColors.ink[500] },
@@ -529,6 +546,11 @@ export default function SimulationStress() {
                 style={{ width: '100%' }}
                 useResizeHandler
               />
+            )}
+            {mcStats && mcStats.histOutliers > 0 && (
+              <div className="text-[11px] text-ink-400 mt-1">
+                {mcStats.histOutliers} extreme outlier path{mcStats.histOutliers === 1 ? '' : 's'} above P99 excluded from histogram (included in all statistics above).
+              </div>
             )}
           </div>
         </div>

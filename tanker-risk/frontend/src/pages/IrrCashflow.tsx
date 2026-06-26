@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import _PlotImport from 'react-plotly.js'
-const Plot: any = (_PlotImport as any)?.default ?? _PlotImport
+﻿import { useEffect, useMemo, useState } from 'react'
+import Plot from '@/lib/Plot'
+
 import { Link, useNavigate } from 'react-router-dom'
+import { useVesselsQuery } from '@/lib/useVessels'
 import { CLASS_COLORS, fmt } from '@/lib/format'
 import MetricCard, { type AnchorRow } from '@/components/cards/MetricCard'
 import {
@@ -49,6 +50,7 @@ export default function IrrCashflow() {
   const profile: FleetProfile = profileRaw ?? makeDefaultFleetProfile()
   const { vesselIds, debt, discountPct, targetIrrPct } = profile
   const vessels = useResolvedVessels(vesselIds)
+  const vesselsQuery = useVesselsQuery()
 
   const [selectedRun, setSelectedRun] = useState<SimulationResult | null>(null)
   useEffect(() => {
@@ -58,8 +60,8 @@ export default function IrrCashflow() {
   }, [runs, selectedRun])
 
   const cfBundle = useMemo<IrrCfBundle>(
-    () => assembleIrrCashflowsFromVessels({ vessels, debt }),
-    [vessels, debt],
+    () => assembleIrrCashflowsFromVessels({ vessels, debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }),
+    [vessels, debt, profile.opexEscalationPct, profile.opexEscalationStartYear],
   )
 
   const projectIrr = useMemo(() => irr(cfBundle.project), [cfBundle.project])
@@ -110,7 +112,7 @@ export default function IrrCashflow() {
     const inputs: TornadoInput[] = []
 
     function cfWith(vesselsArg: Vessel[], debtArg = debt): number[] {
-      return assembleIrrCashflowsFromVessels({ vessels: vesselsArg, debt: debtArg }).equity
+      return assembleIrrCashflowsFromVessels({ vessels: vesselsArg, debt: debtArg, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }).equity
     }
 
     {
@@ -140,21 +142,23 @@ export default function IrrCashflow() {
     }
 
     return tornadoSensitivity(inputs)
-  }, [vessels, debt, equityIrr])
+  }, [vessels, debt, equityIrr, profile.opexEscalationPct, profile.opexEscalationStartYear])
 
   const [breakevenMult, setBreakevenMult] = useState<number | null>(null)
   useEffect(() => {
     const handle = setTimeout(() => {
       const cfFromMult = (k: number): number[] => {
         const scaled = applyMultiplierToVesselsSpot(vessels, k)
-        return assembleIrrCashflowsFromVessels({ vessels: scaled, debt }).equity
+        return assembleIrrCashflowsFromVessels({ vessels: scaled, debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }).equity
       }
       setBreakevenMult(solveBreakevenTceMultiplier(cfFromMult, targetIrrPct))
     }, 250)
     return () => clearTimeout(handle)
-  }, [vessels, debt, targetIrrPct])
+  }, [vessels, debt, targetIrrPct, profile.opexEscalationPct, profile.opexEscalationStartYear])
 
   const breakevenAvgs = useMemo(() => avgSpotPerClass(vessels), [vessels])
+
+  const isBackendDown = !vesselsQuery.isLoading && vesselsQuery.isError
 
   const projectIrrVal = projectIrr.ok ? projectIrr.irr : null
   const equityIrrVal = equityIrr.ok ? equityIrr.irr : null
@@ -199,6 +203,50 @@ export default function IrrCashflow() {
   const portfolio = selectedRun?.portfolio_gross ?? null
   const calendarYears = cfBundle.years.length
 
+  if (vesselsQuery.isLoading) {
+    return (
+      <div className="space-y-6">
+        <h1 className="font-display text-[22px] text-ink-900">Performance</h1>
+        <div className="text-sm text-ink-500 py-8 text-center">Loading vessel data…</div>
+      </div>
+    )
+  }
+
+  if (vessels.length === 0) {
+    return (
+      <div className="space-y-6">
+        <h1 className="font-display text-[22px] text-ink-900">Performance</h1>
+        {isBackendDown ? (
+          <div className="alert alert-warn">
+            <span className="badge bg-amber-100 text-amber-800 shrink-0 mt-0.5">!</span>
+            <div className="min-w-0">
+              <div className="alert-title">Backend unavailable</div>
+              <div className="alert-body">
+                Could not reach the data server. Make sure the backend is running (use <code>start.bat</code>),
+                then reload the page.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="alert alert-info">
+            <span className="badge bg-ons-100 text-ons-800 shrink-0 mt-0.5">Tip</span>
+            <div className="min-w-0">
+              <div className="alert-title">No vessels in this fleet.</div>
+              <div className="alert-body">
+                Add vessels on the{' '}
+                <Link to="/input" className="text-accent-600 hover:underline font-medium">Input</Link>{' '}
+                tab, then come back here to see performance metrics.
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Link to="/input" className="btn-primary btn-sm">Go to Input →</Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <section className="flex items-start justify-between gap-4 flex-wrap">
@@ -206,13 +254,13 @@ export default function IrrCashflow() {
           <h1 className="font-display text-[22px] text-ink-900 mb-1">Performance</h1>
           <p className="text-sm text-ink-500 max-w-2xl">
             Revenue, IRR, NPV, MOIC, DSCR, waterfall, tornado, and breakeven solver. All per-vessel
-            inputs come from the Vessels page — edit there to refresh.
+            inputs come from the Input tab — edit there to refresh.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <RunPicker current={selectedRun} onSelect={(s) => setSelectedRun(s)} />
-          <Link to="/fleet" className="btn-ghost btn-sm">
-            Edit Fleet →
+          <Link to="/input" className="btn-ghost btn-sm">
+            Edit in Input →
           </Link>
         </div>
       </section>
@@ -238,7 +286,16 @@ export default function IrrCashflow() {
             {vessels.length} vessel{vessels.length === 1 ? '' : 's'} · investment {fmt.usdCompact(cfBundle.totals.capex)}
           </span>
         </div>
-        <div className="panel-body grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="panel-body grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="rounded-card border border-ink-200 bg-ink-50 px-3 py-2.5">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-ink-500">Fleet NAV</div>
+            <div className="font-display text-[20px] text-ink-900 num leading-tight mt-1">
+              {fmt.usdCompact(cfBundle.totals.capex)}
+            </div>
+            <div className="text-[10px] text-ink-500 mt-1">
+              Total current market value of {vessels.length} vessel{vessels.length === 1 ? '' : 's'}
+            </div>
+          </div>
           <div className="rounded-card border border-ink-200 bg-ink-50 px-3 py-2.5">
             <div className="text-[11px] uppercase tracking-[0.12em] text-ink-500">Calendar span</div>
             <div className="font-display text-[16px] text-ink-900 num leading-tight mt-1">
@@ -247,7 +304,7 @@ export default function IrrCashflow() {
                 : '—'}
             </div>
             <div className="text-[10px] text-ink-500 mt-1">
-              Edit each vessel's purchase date & holding years on the Vessels page.
+              Edit each vessel's purchase date &amp; holding years on the Input tab.
             </div>
           </div>
           <div>

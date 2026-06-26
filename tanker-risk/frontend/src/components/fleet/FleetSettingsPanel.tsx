@@ -46,7 +46,7 @@ export default function FleetSettingsPanel({ profile, fleetCalendarYears, onChan
       </div>
 
       <div className="panel-body">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div>
             <label className="field-label flex items-center justify-between">
               <span>Fleet calendar span</span>
@@ -83,6 +83,35 @@ export default function FleetSettingsPanel({ profile, fleetCalendarYears, onChan
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 text-[12px]">%</span>
             </div>
+          </div>
+          <div>
+            <label className="field-label">OPEX escalation (% / yr)</label>
+            <div className="relative">
+              <input
+                type="number"
+                className="field-input pr-7"
+                step={0.5}
+                min={-20}
+                max={20}
+                value={profile.opexEscalationPct ?? 0}
+                onChange={(e) => onChange({ opexEscalationPct: Number(e.target.value) })}
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 text-[12px]">%</span>
+            </div>
+            <p className="text-[10px] text-ink-400 mt-0.5">Annual compound change, positive = increase</p>
+          </div>
+          <div>
+            <label className="field-label">Escalation starts</label>
+            <select
+              className="field-select"
+              value={profile.opexEscalationStartYear ?? 1}
+              onChange={(e) => onChange({ opexEscalationStartYear: Number(e.target.value) })}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((y) => (
+                <option key={y} value={y}>Year {y}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-ink-400 mt-0.5">1-based holding year when escalation kicks in</p>
           </div>
         </div>
       </div>

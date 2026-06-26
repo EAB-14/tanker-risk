@@ -22,6 +22,7 @@ export function exportFleetProfile(profile: FleetProfile, vessels: Vessel[], fil
     { Setting: 'Tenor (years)', Value: profile.debt.tenor_years },
     { Setting: 'Amort style', Value: profile.debt.style },
     { Setting: 'Balloon (%)', Value: profile.debt.balloon_pct },
+    { Setting: 'Issuance fee (%)', Value: profile.debt.issuance_fee_pct },
   ]
 
   const vesselRows = vessels.map((v) => ({

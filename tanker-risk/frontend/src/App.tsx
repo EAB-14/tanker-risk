@@ -45,7 +45,7 @@ export default function App() {
           <div className="px-6 py-3 flex items-baseline justify-between gap-4 flex-wrap">
             <div className="flex items-baseline gap-6 min-w-0">
               <div className="font-display text-white text-[18px] tracking-tight leading-none whitespace-nowrap">
-                Tanker Revenue Risk
+                Tanker Risk
               </div>
             </div>
             <div className="text-ons-400 text-[11px] font-mono">v0.3.0</div>

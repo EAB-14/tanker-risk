@@ -194,6 +194,21 @@ export default function VesselDetailEditor({ vessel }: Props) {
     }))
   }
 
+  const [opexEsc, setOpexEsc] = useState({ pct: 5, startYear: 2 })
+
+  function applyOpexEscalation() {
+    setDraft((d) => {
+      const base = d.opex_usd_per_day_by_year[0] ?? 0
+      const start0 = opexEsc.startYear - 1
+      const arr = d.opex_usd_per_day_by_year.map((val, yi) => {
+        if (yi < start0) return val
+        const years = yi - start0 + 1
+        return Math.round(base * Math.pow(1 + opexEsc.pct / 100, years))
+      })
+      return { ...d, opex_usd_per_day_by_year: arr }
+    })
+  }
+
   function reset() {
     setDraft(vesselToDraft(vessel))
   }
@@ -320,6 +335,33 @@ export default function VesselDetailEditor({ vessel }: Props) {
               ⇣ Drydock
             </button>
           </div>
+        </div>
+
+        {/* OPEX escalation tool */}
+        <div className="flex items-center gap-2 flex-wrap text-[11px] bg-ons-50/60 border border-ons-200 rounded px-3 py-1.5 mb-1">
+          <span className="text-ink-500 whitespace-nowrap">OPEX escalation:</span>
+          <div className="flex items-center gap-1">
+            <input type="number" step={1} min={-20} max={30}
+              value={opexEsc.pct}
+              onChange={(e) => setOpexEsc((s) => ({ ...s, pct: Number(e.target.value) }))}
+              className="w-14 border border-ink-200 rounded px-1.5 py-0.5 text-[11px] num text-right bg-white" />
+            <span className="text-ink-400">%/yr</span>
+          </div>
+          <span className="text-ink-400">from year</span>
+          <select
+            className="border border-ink-200 rounded px-1.5 py-0.5 text-[11px] bg-white"
+            value={opexEsc.startYear}
+            onChange={(e) => setOpexEsc((s) => ({ ...s, startYear: Number(e.target.value) }))}
+          >
+            {Array.from({ length: draft.holding_years }, (_, i) => (
+              <option key={i + 1} value={i + 1}>Y{i + 1}</option>
+            ))}
+          </select>
+          <button type="button" className="btn-accent btn-sm normal-case tracking-normal px-2 py-0.5 text-[10px]"
+            onClick={applyOpexEscalation}>
+            Apply
+          </button>
+          <span className="text-[10px] text-ink-400">Compounds from Y1 OPEX base</span>
         </div>
         <div className="overflow-x-auto rounded border border-ink-200">
           <table className="inst w-full">

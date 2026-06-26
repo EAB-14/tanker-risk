@@ -126,6 +126,7 @@ export type IrrDebtConfig = {
   tenor_years: number
   style: IrrDebtAmortStyle
   balloon_pct: number
+  issuance_fee_pct: number
 }
 
 // Vessel registry (v6) -----------------------------------------------------
@@ -172,6 +173,8 @@ export type FleetProfile = {
   discountPct: number
   targetIrrPct: number
   debt: IrrDebtConfig
+  opexEscalationPct?: number
+  opexEscalationStartYear?: number
 }
 
 export type SavedFleetProfile = {

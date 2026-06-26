@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import { api } from '@/api/client'
 import FleetMatrix from '@/components/fleet/FleetMatrix'
@@ -28,7 +28,7 @@ function isValidProfile(obj: unknown): obj is FleetProfile {
   return p.schemaVersion === 6 && Array.isArray(p.vesselIds) && typeof p.debt === 'object'
 }
 
-const DEBT_KEYS = ['enabled','sizing','ltv_pct','loan_amount_usd','interest_pct','tenor_years','style','balloon_pct']
+const DEBT_KEYS = ['enabled','sizing','ltv_pct','loan_amount_usd','interest_pct','tenor_years','style','balloon_pct','issuance_fee_pct']
 function looksLikeDebt(obj: unknown): obj is Partial<IrrDebtConfig> {
   return typeof obj === 'object' && obj !== null && DEBT_KEYS.some((k) => k in (obj as Record<string, unknown>))
 }
@@ -70,6 +70,7 @@ function parseFleetExcel(buf: ArrayBuffer, allVessels: Vessel[]): FleetProfile |
         tenor_years: Number(kv['Tenor (years)'] ?? 10),
         style: (String(kv['Amort style'] ?? 'level-payment')) as IrrDebtAmortStyle,
         balloon_pct: Number(kv['Balloon (%)'] ?? 0),
+        issuance_fee_pct: Number(kv['Issuance fee (%)'] ?? 0),
       },
     }
   } catch { return null }
@@ -97,6 +98,7 @@ function parseDebtExcel(buf: ArrayBuffer): Partial<IrrDebtConfig> | null {
     if ('Tenor (years)'     in kv) debt.tenor_years       = Number(kv['Tenor (years)'])
     if ('Amort style'       in kv) debt.style             = kv['Amort style'] as IrrDebtAmortStyle
     if ('Balloon (%)'       in kv) debt.balloon_pct       = Number(kv['Balloon (%)'])
+    if ('Issuance fee (%)' in kv) debt.issuance_fee_pct  = Number(kv['Issuance fee (%)'])
     return Object.keys(debt).length > 0 ? debt : null
   } catch { return null }
 }
@@ -109,6 +111,7 @@ export default function InputPage() {
   const setSimConfig   = useAppStore((s) => s.setSimConfig)
   const navigate       = useNavigate()
   const toast          = useToast()
+  const qc             = useQueryClient()
 
   const scenarios     = useQuery({ queryKey: ['scenarios'],       queryFn: api.listScenarios })
   const savedProfiles = useQuery({ queryKey: ['fleet-profiles'],  queryFn: api.listFleetProfiles })
@@ -143,6 +146,11 @@ export default function InputPage() {
     }
     return Number.isFinite(calStart) && Number.isFinite(calEnd) ? calEnd - calStart + 1 : 0
   }, [fleetVessels])
+
+  const fleetNav = useMemo(
+    () => fleetVessels.reduce((s, v) => s + v.current_market_value_usd, 0),
+    [fleetVessels],
+  )
 
   const debt = profile.debt
   function setDebt(patch: Partial<IrrDebtConfig>) { setProfile({ debt: { ...debt, ...patch } }) }
@@ -309,6 +317,15 @@ export default function InputPage() {
                 ))}
               </div>
             )}
+            {fleetVessels.length > 0 && (
+              <div className="flex items-center gap-4 px-4 py-2.5 bg-ons-50/80 border border-ons-200 rounded-card text-[12px]">
+                <span className="text-[10px] uppercase tracking-[0.12em] text-ink-400">Fleet NAV</span>
+                <span className="num font-semibold text-ink-900">{fmt.usdCompact(fleetNav)}</span>
+                <span className="text-ink-400">·</span>
+                <span className="text-[10px] uppercase tracking-[0.12em] text-ink-400">Vessels</span>
+                <span className="num font-semibold text-ink-700">{fleetVessels.length}</span>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -415,6 +432,17 @@ export default function InputPage() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="field-label">Issuance fee (%)</label>
+                  <div className="relative">
+                    <input type="number" className="field-input pr-6"
+                      value={(debt.issuance_fee_pct * 100).toFixed(1)} step={0.25} min={0} max={10}
+                      onChange={(e) => setDebt({ issuance_fee_pct: Number(e.target.value) / 100 })} />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 text-[11px]">%</span>
+                  </div>
+                  <p className="text-[10px] text-ink-400 mt-0.5">One-time fee deducted from loan proceeds at closing</p>
+                </div>
+
               </div>
             </div>
           </div>
@@ -437,14 +465,32 @@ export default function InputPage() {
                   {scenarios.data?.map((s: any) => {
                     const on = simConfig.selectedScenarios.includes(s.id)
                     return (
-                      <button key={s.id} type="button" onClick={() => toggleScenario(s.id)}
-                        className={`px-3 py-1.5 rounded border text-[12px] transition ${
-                          on ? 'bg-accent-600 text-white border-accent-600'
-                             : 'border-ink-300 text-ink-700 hover:border-accent-400 hover:text-accent-700'
-                        }`}
-                        title={s.description ?? ''}>
-                        {s.name}
-                      </button>
+                      <div key={s.id} className="flex items-center gap-0.5">
+                        <button type="button" onClick={() => toggleScenario(s.id)}
+                          className={`px-3 py-1.5 rounded-l border text-[12px] transition ${
+                            on ? 'bg-accent-600 text-white border-accent-600'
+                               : 'border-ink-300 text-ink-700 hover:border-accent-400 hover:text-accent-700'
+                          }`}
+                          title={s.description ?? ''}>
+                          {s.name}
+                        </button>
+                        <button type="button"
+                          className="px-1.5 py-1.5 rounded-r border border-l-0 border-ink-300 text-ink-400 hover:text-danger hover:border-danger text-[11px] transition"
+                          title={`Delete "${s.name}"`}
+                          onClick={async () => {
+                            if (!window.confirm(`Delete scenario "${s.name}"?`)) return
+                            try {
+                              await api.deleteScenario(s.id)
+                              setSimConfig({ selectedScenarios: simConfig.selectedScenarios.filter((x) => x !== s.id) })
+                              qc.invalidateQueries({ queryKey: ['scenarios'] })
+                              toast.success('Deleted', `Scenario "${s.name}" removed.`)
+                            } catch (err) {
+                              toast.error('Delete failed', err instanceof Error ? err.message : String(err))
+                            }
+                          }}>
+                          ✕
+                        </button>
+                      </div>
                     )
                   })}
                 </div>
@@ -453,7 +499,7 @@ export default function InputPage() {
                 </p>
               </div>
 
-              <CustomScenarioBuilder vessels={fleetVessels} debt={profile.debt} />
+              <CustomScenarioBuilder vessels={fleetVessels} debt={profile.debt} opexEscalationPct={profile.opexEscalationPct} opexEscalationStartYear={profile.opexEscalationStartYear} />
 
             </div>
           </div>

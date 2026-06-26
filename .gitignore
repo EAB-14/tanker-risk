@@ -46,6 +46,17 @@ yarn-error.log*
 tanker-risk/backend/data/*.db
 tanker-risk/backend/data/**/*.db
 
+# Backend data directory (db, photos, runs — all user data)
+tanker-risk/backend/data/
+
+# Vessel photos
+vessel_photos/
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+
 # Simulation run data (Parquet, CSV exports, HDF5)
 *.parquet
 *.h5
@@ -55,6 +66,9 @@ tanker-risk/backend/data/**/*.db
 tce rates.xlsx
 *tce*.xlsx
 *TCE*.xlsx
+
+# External data directory (C:\Tanker-database — outside tree, but just in case)
+Tanker-database/
 # ───────────────────────────────────────────────────────────────────────────
 
 # Env

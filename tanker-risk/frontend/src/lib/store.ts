@@ -107,6 +107,7 @@ const DEFAULT_DEBT_CONFIG: IrrDebtConfig = {
   tenor_years: 10,
   style: 'level-payment',
   balloon_pct: 0,
+  issuance_fee_pct: 0,
 }
 
 export function makeVesselId(): string {

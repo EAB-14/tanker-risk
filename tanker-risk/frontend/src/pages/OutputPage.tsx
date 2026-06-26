@@ -35,8 +35,8 @@ export default function OutputPage() {
   )
 
   const bundle = useMemo(
-    () => assembleIrrCashflowsFromVessels({ vessels: fleetVessels, debt: profile.debt }),
-    [fleetVessels, profile.debt],
+    () => assembleIrrCashflowsFromVessels({ vessels: fleetVessels, debt: profile.debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }),
+    [fleetVessels, profile.debt, profile.opexEscalationPct, profile.opexEscalationStartYear],
   )
 
   const projectIrrResult = useMemo(() => irr(bundle.project),  [bundle.project])
@@ -80,7 +80,7 @@ export default function OutputPage() {
         medianByClass[cls] = tceQuantileToYearly(median, Math.max(maxHoldingYears, 1))
       }
       const stressed = applyMedianTce(fleetVessels, medianByClass)
-      const b = assembleIrrCashflowsFromVessels({ vessels: stressed, debt: profile.debt })
+      const b = assembleIrrCashflowsFromVessels({ vessels: stressed, debt: profile.debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear })
       const proj = irr(b.project)
       const eq   = irr(b.equity)
       const scenRevenue = b.perYear.reduce((s, r) => s + r.revenue, 0)
@@ -91,7 +91,7 @@ export default function OutputPage() {
         revenue:    scenRevenue,
       }
     })
-  }, [lastSimulation, fleetVessels, profile.debt, maxHoldingYears])
+  }, [lastSimulation, fleetVessels, profile.debt, maxHoldingYears, profile.opexEscalationPct, profile.opexEscalationStartYear])
 
   const classCounts = useMemo(() => {
     const out: Record<string, number> = {}
@@ -123,7 +123,7 @@ export default function OutputPage() {
 
       {/* ── Print header ── */}
       <div className="hidden print:block mb-4">
-        <div className="font-display text-[20px] text-ink-900">Tanker Revenue Risk — Output Report</div>
+        <div className="font-display text-[20px] text-ink-900">Tanker Risk — Output Report</div>
         <div className="text-[11px] text-ink-500 mt-0.5">
           {profile.name || 'Untitled Fleet'} ·{' '}
           Generated {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} ·{' '}
@@ -139,6 +139,7 @@ export default function OutputPage() {
         <div className="panel-header">Fleet Summary</div>
         <div className="px-5 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5">
           <Chip label="Vessels"    value={String(fleetVessels.length)} />
+          <Chip label="Fleet NAV"  value={fmt.usdCompact(bundle.totals.capex)} accent />
           <Chip label="Investment" value={fmt.usdCompact(bundle.totals.capex)} accent />
           {hasDebt && <Chip label="Equity" value={fmt.usdCompact(bundle.totals.equityCapex)} accent />}
           {hasDebt && <Chip label="Loan"   value={fmt.usdCompact(bundle.totals.loanAmount)} />}
@@ -341,7 +342,7 @@ export default function OutputPage() {
 
       {/* Print footer */}
       <div className="hidden print:block text-[10px] text-ink-400 text-center pt-3 border-t border-ink-200">
-        Onassis Foundation · Tanker Revenue Risk v0.3.0 · Confidential
+        Onassis Foundation · Tanker Risk v0.3.0 · Confidential
       </div>
     </div>
   )

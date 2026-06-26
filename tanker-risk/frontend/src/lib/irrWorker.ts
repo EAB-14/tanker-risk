@@ -6,6 +6,8 @@ import type { IrrDebtConfig, RevenueCell, Vessel } from '@/types/api'
 export type IrrWorkerRequest = {
   vessels: Vessel[]
   debt: IrrDebtConfig
+  opexEscalationPct?: number
+  opexEscalationStartYear?: number
   // For each path index, weekly TCE by vessel_class
   tcePathsByClass: Record<string, number[][]>  // class -> [paths][weeks]
 }
@@ -36,7 +38,7 @@ function applyAnnualTceToVessels(
 }
 
 self.onmessage = (e: MessageEvent<IrrWorkerRequest>) => {
-  const { vessels, debt, tcePathsByClass } = e.data
+  const { vessels, debt, tcePathsByClass, opexEscalationPct, opexEscalationStartYear } = e.data
 
   let nPaths = 0
   for (const cls of Object.keys(tcePathsByClass)) {
@@ -62,10 +64,10 @@ self.onmessage = (e: MessageEvent<IrrWorkerRequest>) => {
       annualTceByClass[cls] = tceQuantileToYearly(weeklyPath, maxHoldingYears)
     }
     const overridden = applyAnnualTceToVessels(vessels, annualTceByClass)
-    const bundle = assembleIrrCashflowsFromVessels({ vessels: overridden, debt })
+    const bundle = assembleIrrCashflowsFromVessels({ vessels: overridden, debt, opexEscalationPct, opexEscalationStartYear })
     const r = irr(bundle.equity)
     if (r.ok && Number.isFinite(r.irr)) {
-      irrs.push(r.irr)
+      irrs.push(Math.max(-1, Math.min(r.irr, 1.5)))
     } else {
       failures++
     }

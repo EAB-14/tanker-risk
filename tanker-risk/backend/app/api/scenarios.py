@@ -41,3 +41,18 @@ def create_scenario(s: ScenarioCreate) -> dict:
         )
         sid = cur.lastrowid
     return {"id": sid, **s.model_dump(), "is_builtin": False}
+
+
+@router.delete("/{scenario_id}")
+def delete_scenario(scenario_id: int) -> dict:
+    conn = get_connection()
+    row = conn.execute("SELECT is_builtin FROM scenarios WHERE id = ?", (scenario_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    if row["is_builtin"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Cannot delete built-in scenarios")
+    with db_cursor() as cur:
+        cur.execute("DELETE FROM scenarios WHERE id = ?", (scenario_id,))
+    return {"deleted": scenario_id}

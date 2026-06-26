@@ -32,24 +32,14 @@ export function irr(cashflows: number[], opts: IrrOpts = {}): IrrResult {
   const hasNeg = cashflows.some((v) => v < 0)
   if (!hasPos || !hasNeg) return { ok: false, reason: 'no_sign_change' }
 
+  // Search range capped at 150%. Higher values are leverage artifacts from
+  // thin equity bases where t=0 combines investment + operations.
   let lo = -0.999
-  let hi = 10
+  let hi = 1.5
   let fLo = npv(lo, cashflows)
   let fHi = npv(hi, cashflows)
 
-  if (fLo * fHi > 0) {
-    let bracketed = false
-    for (const r of [50, 100, 1000]) {
-      const fR = npv(r, cashflows)
-      if (fLo * fR <= 0) {
-        hi = r
-        fHi = fR
-        bracketed = true
-        break
-      }
-    }
-    if (!bracketed) return { ok: false, reason: 'no_convergence' }
-  }
+  if (fLo * fHi > 0) return { ok: false, reason: 'no_convergence' }
 
   for (let i = 0; i < maxIter; i++) {
     const mid = 0.5 * (lo + hi)
@@ -265,8 +255,10 @@ const EMPTY_BUNDLE: IrrCfBundle = {
 export function assembleIrrCashflowsFromVessels(args: {
   vessels: Vessel[]
   debt: IrrDebtConfig
+  opexEscalationPct?: number
+  opexEscalationStartYear?: number
 }): IrrCfBundle {
-  const { vessels, debt } = args
+  const { vessels, debt, opexEscalationPct = 0, opexEscalationStartYear = 1 } = args
   if (vessels.length === 0) return { ...EMPTY_BUNDLE }
 
   const warnings: string[] = []
@@ -323,7 +315,12 @@ export function assembleIrrCashflowsFromVessels(args: {
       if (calYear >= cy && calYear <= activeEndCal) {
         const oy = calYear - cy
         rev += annualRevenueForVesselYear(v, oy)
-        opex += opexForVesselYear(v, oy)
+        let yearOpex = opexForVesselYear(v, oy)
+        if (opexEscalationPct !== 0 && oy >= (opexEscalationStartYear - 1)) {
+          const escalationYears = oy - (opexEscalationStartYear - 1) + 1
+          yearOpex *= Math.pow(1 + opexEscalationPct / 100, escalationYears)
+        }
+        opex += yearOpex
       }
       // Year-0 initial investment at fleetStart (= current year): sum of each
       // vessel's current market value.
@@ -337,6 +334,7 @@ export function assembleIrrCashflowsFromVessels(args: {
     // Single fleet-level loan: equity capex paid only at t=0 (loan draw offsets capex on that row).
     // Capex events for staggered purchases reduce equity cash flow inline. At final year, retire
     // any remaining loan balance.
+    const issuanceFee = t === 0 && debt.enabled ? loanAmount * (debt.issuance_fee_pct ?? 0) : 0
     const loanDraw = t === 0 ? loanAmount : 0
     const equityCf =
       operating
@@ -344,6 +342,7 @@ export function assembleIrrCashflowsFromVessels(args: {
       + terminal_t
       - capex_t
       + loanDraw
+      - issuanceFee
       - (isLast ? a.ending_balance : 0)
     const dscr = a.debt_service > 0 && operating > 0 ? operating / a.debt_service : null
     perYear.push({

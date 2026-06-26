@@ -96,6 +96,8 @@ export function useRunSimulation({ onDone }: RunSimulationOptions = {}) {
     const msg: IrrWorkerRequest = {
       vessels,
       debt: profile.debt,
+      opexEscalationPct: profile.opexEscalationPct,
+      opexEscalationStartYear: profile.opexEscalationStartYear,
       tcePathsByClass: result.path_samples.tce,
     }
     worker.postMessage(msg)

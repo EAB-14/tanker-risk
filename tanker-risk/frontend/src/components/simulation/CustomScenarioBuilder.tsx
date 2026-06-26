@@ -5,7 +5,7 @@ import { assembleIrrCashflowsFromVessels, irr } from '@/lib/finance'
 import { fmt } from '@/lib/format'
 import { useAppStore, DEFAULT_CUSTOM_SCENARIO } from '@/lib/store'
 import { useMutationErrorToast, useToast } from '@/lib/useToast'
-import type { IrrDebtConfig, Vessel } from '@/types/api'
+import type { IrrDebtConfig, FleetProfile, Vessel } from '@/types/api'
 import type { CustomScenario } from '@/lib/store'
 
 // Apply all scenario parameters client-side for the deterministic preview
@@ -37,9 +37,13 @@ function applyCustomScenario(vessels: Vessel[], cs: CustomScenario): Vessel[] {
 export default function CustomScenarioBuilder({
   vessels,
   debt,
+  opexEscalationPct,
+  opexEscalationStartYear,
 }: {
   vessels: Vessel[]
   debt: IrrDebtConfig
+  opexEscalationPct?: number
+  opexEscalationStartYear?: number
 }) {
   const cs           = useAppStore((s) => s.simConfig.customScenario) ?? DEFAULT_CUSTOM_SCENARIO
   const setCS        = useAppStore((s) => s.setCustomScenario)
@@ -49,8 +53,8 @@ export default function CustomScenarioBuilder({
 
   // Base deterministic IRR
   const baseBundle = useMemo(
-    () => assembleIrrCashflowsFromVessels({ vessels, debt }),
-    [vessels, debt],
+    () => assembleIrrCashflowsFromVessels({ vessels, debt, opexEscalationPct, opexEscalationStartYear }),
+    [vessels, debt, opexEscalationPct, opexEscalationStartYear],
   )
   const baseIrr = useMemo(() => irr(baseBundle.project), [baseBundle.project])
 
@@ -62,9 +66,9 @@ export default function CustomScenarioBuilder({
   const stressBundle = useMemo(
     () =>
       stressedVessels.length > 0
-        ? assembleIrrCashflowsFromVessels({ vessels: stressedVessels, debt })
+        ? assembleIrrCashflowsFromVessels({ vessels: stressedVessels, debt, opexEscalationPct, opexEscalationStartYear })
         : null,
-    [stressedVessels, debt],
+    [stressedVessels, debt, opexEscalationPct, opexEscalationStartYear],
   )
   const stressIrr = useMemo(
     () => (stressBundle ? irr(stressBundle.project) : null),
