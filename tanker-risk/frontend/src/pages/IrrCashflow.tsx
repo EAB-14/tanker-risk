@@ -64,12 +64,12 @@ export default function IrrCashflow() {
     [vessels, debt, profile.opexEscalationPct, profile.opexEscalationStartYear],
   )
 
-  const projectIrr = useMemo(() => irr(cfBundle.project), [cfBundle.project])
-  const equityIrr = useMemo(() => irr(cfBundle.equity), [cfBundle.equity])
-  const npvEquity = useMemo(() => npv(discountPct, cfBundle.equity), [cfBundle.equity, discountPct])
-  const npvProject = useMemo(() => npv(discountPct, cfBundle.project), [cfBundle.project, discountPct])
-  const paybackEquity = useMemo(() => paybackYears(cfBundle.equity), [cfBundle.equity])
-  const moicEquity = useMemo(() => moic(cfBundle.equity), [cfBundle.equity])
+  const projectIrr = useMemo(() => irr(cfBundle.projectIrr), [cfBundle.projectIrr])
+  const equityIrr = useMemo(() => irr(cfBundle.equityIrr), [cfBundle.equityIrr])
+  const npvEquity = useMemo(() => npv(discountPct, cfBundle.equityIrr), [cfBundle.equityIrr, discountPct])
+  const npvProject = useMemo(() => npv(discountPct, cfBundle.projectIrr), [cfBundle.projectIrr, discountPct])
+  const paybackEquity = useMemo(() => paybackYears(cfBundle.equityIrr), [cfBundle.equityIrr])
+  const moicEquity = useMemo(() => moic(cfBundle.equityIrr), [cfBundle.equityIrr])
 
   const dscrStats = useMemo(() => {
     const dscrs = cfBundle.perYear.filter((r) => r.dscr != null) as Array<{ year: number; dscr: number }>
@@ -112,7 +112,7 @@ export default function IrrCashflow() {
     const inputs: TornadoInput[] = []
 
     function cfWith(vesselsArg: Vessel[], debtArg = debt): number[] {
-      return assembleIrrCashflowsFromVessels({ vessels: vesselsArg, debt: debtArg, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }).equity
+      return assembleIrrCashflowsFromVessels({ vessels: vesselsArg, debt: debtArg, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }).equityIrr
     }
 
     {
@@ -149,7 +149,7 @@ export default function IrrCashflow() {
     const handle = setTimeout(() => {
       const cfFromMult = (k: number): number[] => {
         const scaled = applyMultiplierToVesselsSpot(vessels, k)
-        return assembleIrrCashflowsFromVessels({ vessels: scaled, debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }).equity
+        return assembleIrrCashflowsFromVessels({ vessels: scaled, debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear }).equityIrr
       }
       setBreakevenMult(solveBreakevenTceMultiplier(cfFromMult, targetIrrPct))
     }, 250)

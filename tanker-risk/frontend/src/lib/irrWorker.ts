@@ -65,9 +65,9 @@ self.onmessage = (e: MessageEvent<IrrWorkerRequest>) => {
     }
     const overridden = applyAnnualTceToVessels(vessels, annualTceByClass)
     const bundle = assembleIrrCashflowsFromVessels({ vessels: overridden, debt, opexEscalationPct, opexEscalationStartYear })
-    const r = irr(bundle.equity)
+    const r = irr(bundle.equityIrr)
     if (r.ok && Number.isFinite(r.irr)) {
-      irrs.push(Math.max(-1, Math.min(r.irr, 1.5)))
+      irrs.push(r.irr)
     } else {
       failures++
     }

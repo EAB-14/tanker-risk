@@ -111,8 +111,8 @@ function deterministicIrrFromTceMedians(
 ): { project: number | null; equity: number | null; minDscr: number | null; revenue: number } {
   const overridden = applyMedianTceToVessels(vessels, medianTceByClass)
   const bundle = assembleIrrCashflowsFromVessels({ vessels: overridden, debt, opexEscalationPct, opexEscalationStartYear })
-  const proj = irr(bundle.project)
-  const eq = irr(bundle.equity)
+  const proj = irr(bundle.projectIrr)
+  const eq = irr(bundle.equityIrr)
   const dscrs = bundle.perYear.filter((r) => r.dscr != null).map((r) => r.dscr as number)
   const minDscr = dscrs.length > 0 ? Math.min(...dscrs) : null
   const totalRevenue = bundle.perYear.reduce((s, r) => s + r.revenue, 0)
@@ -283,23 +283,16 @@ export default function SimulationStress() {
     if (mcIrrs.length === 0) return null
     const sorted = [...mcIrrs].sort((a, b) => a - b)
     const n = sorted.length
-
-    // Winsorize at P2.5 / P97.5 to tame leverage-driven tail outliers.
-    // Values outside this band are pulled to the boundary before computing stats.
-    const loClip = sorted[Math.max(0, Math.floor(n * 0.025))]
-    const hiClip = sorted[Math.min(n - 1, Math.ceil(n * 0.975) - 1)]
-    const win = sorted.map((v) => Math.max(loClip, Math.min(hiClip, v)))
-
     const target = profile.targetIrrPct
-    const p5 = quantile(win, 0.05)
-    const p50 = quantile(win, 0.5)
-    const p95 = quantile(win, 0.95)
-    const p99 = quantile(win, 0.99)
+    const p5 = quantile(sorted, 0.05)
+    const p50 = quantile(sorted, 0.5)
+    const p95 = quantile(sorted, 0.95)
+    const p99 = quantile(sorted, 0.99)
     const aboveTarget = sorted.filter((v) => v >= target).length
     const probTarget = aboveTarget / sorted.length
     const cvarN = Math.max(1, Math.floor(n * 0.05))
-    const cvar = win.slice(0, cvarN).reduce((s, v) => s + v, 0) / cvarN
-    const histMax = hiClip * 1.1
+    const cvar = sorted.slice(0, cvarN).reduce((s, v) => s + v, 0) / cvarN
+    const histMax = p99 * 1.1
     const histIrrs = mcIrrs.filter((v) => v <= histMax)
     const histOutliers = mcIrrs.length - histIrrs.length
     return { p5, p50, p95, p99, histMax, histIrrs, histOutliers, probTarget, cvar, n }

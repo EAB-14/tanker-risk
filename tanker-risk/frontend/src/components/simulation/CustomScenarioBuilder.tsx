@@ -56,7 +56,7 @@ export default function CustomScenarioBuilder({
     () => assembleIrrCashflowsFromVessels({ vessels, debt, opexEscalationPct, opexEscalationStartYear }),
     [vessels, debt, opexEscalationPct, opexEscalationStartYear],
   )
-  const baseIrr = useMemo(() => irr(baseBundle.project), [baseBundle.project])
+  const baseIrr = useMemo(() => irr(baseBundle.projectIrr), [baseBundle.projectIrr])
 
   // Stressed deterministic IRR (only when enabled and fleet is non-empty)
   const stressedVessels = useMemo(
@@ -71,7 +71,7 @@ export default function CustomScenarioBuilder({
     [stressedVessels, debt, opexEscalationPct, opexEscalationStartYear],
   )
   const stressIrr = useMemo(
-    () => (stressBundle ? irr(stressBundle.project) : null),
+    () => (stressBundle ? irr(stressBundle.projectIrr) : null),
     [stressBundle],
   )
 

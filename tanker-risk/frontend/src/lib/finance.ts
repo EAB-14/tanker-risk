@@ -32,10 +32,8 @@ export function irr(cashflows: number[], opts: IrrOpts = {}): IrrResult {
   const hasNeg = cashflows.some((v) => v < 0)
   if (!hasPos || !hasNeg) return { ok: false, reason: 'no_sign_change' }
 
-  // Search range capped at 150%. Higher values are leverage artifacts from
-  // thin equity bases where t=0 combines investment + operations.
   let lo = -0.999
-  let hi = 1.5
+  let hi = 10
   let fLo = npv(lo, cashflows)
   let fHi = npv(hi, cashflows)
 
@@ -224,6 +222,8 @@ export type IrrCfPerYear = {
 export type IrrCfBundle = {
   project: number[]
   equity: number[]
+  projectIrr: number[]
+  equityIrr: number[]
   years: number[]
   perYear: IrrCfPerYear[]
   totals: {
@@ -246,6 +246,8 @@ export function loanAmountFromConfig(debt: IrrDebtConfig, totalCapex: number): n
 const EMPTY_BUNDLE: IrrCfBundle = {
   project: [],
   equity: [],
+  projectIrr: [],
+  equityIrr: [],
   years: [],
   perYear: [],
   totals: { capex: 0, loanAmount: 0, equityCapex: 0, terminal: 0, fleetStart: null, fleetEnd: null },
@@ -366,9 +368,28 @@ export function assembleIrrCashflowsFromVessels(args: {
   const project = perYear.map((r) => r.project_cf)
   const equity = perYear.map((r) => r.equity_cf)
 
+  // Standard PE/real-asset convention: investment at t=0, operations from t=1.
+  // Separating investment from Year-0 operations prevents leverage from
+  // artificially shrinking the equity base and inflating IRR.
+  const issuanceFeeTotal = debt.enabled ? loanAmount * (debt.issuance_fee_pct ?? 0) : 0
+  const projectIrr = [-capex]
+  const equityIrr = [-(equityCapex + issuanceFeeTotal)]
+  for (let t = 0; t < perYear.length; t++) {
+    const r = perYear[t]
+    if (t === 0) {
+      projectIrr.push(r.project_cf + r.capex)
+      equityIrr.push(r.equity_cf + r.capex - loanAmount + issuanceFeeTotal)
+    } else {
+      projectIrr.push(r.project_cf)
+      equityIrr.push(r.equity_cf)
+    }
+  }
+
   return {
     project,
     equity,
+    projectIrr,
+    equityIrr,
     years,
     perYear,
     totals: { capex, loanAmount, equityCapex, terminal, fleetStart, fleetEnd },

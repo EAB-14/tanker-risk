@@ -39,12 +39,12 @@ export default function OutputPage() {
     [fleetVessels, profile.debt, profile.opexEscalationPct, profile.opexEscalationStartYear],
   )
 
-  const projectIrrResult = useMemo(() => irr(bundle.project),  [bundle.project])
-  const equityIrrResult  = useMemo(() => irr(bundle.equity),   [bundle.equity])
-  const projectNpv       = useMemo(() => npv(profile.discountPct, bundle.project), [bundle.project, profile.discountPct])
-  const projectMoic      = useMemo(() => moic(bundle.project), [bundle.project])
-  const equityMoic       = useMemo(() => moic(bundle.equity),  [bundle.equity])
-  const projectPb        = useMemo(() => paybackYears(bundle.project), [bundle.project])
+  const projectIrrResult = useMemo(() => irr(bundle.projectIrr),  [bundle.projectIrr])
+  const equityIrrResult  = useMemo(() => irr(bundle.equityIrr),   [bundle.equityIrr])
+  const projectNpv       = useMemo(() => npv(profile.discountPct, bundle.projectIrr), [bundle.projectIrr, profile.discountPct])
+  const projectMoic      = useMemo(() => moic(bundle.projectIrr), [bundle.projectIrr])
+  const equityMoic       = useMemo(() => moic(bundle.equityIrr),  [bundle.equityIrr])
+  const projectPb        = useMemo(() => paybackYears(bundle.projectIrr), [bundle.projectIrr])
 
   const totalRevenue = bundle.perYear.reduce((s, r) => s + r.revenue, 0)
   const totalOpex    = bundle.perYear.reduce((s, r) => s + r.opex, 0)
@@ -81,8 +81,8 @@ export default function OutputPage() {
       }
       const stressed = applyMedianTce(fleetVessels, medianByClass)
       const b = assembleIrrCashflowsFromVessels({ vessels: stressed, debt: profile.debt, opexEscalationPct: profile.opexEscalationPct, opexEscalationStartYear: profile.opexEscalationStartYear })
-      const proj = irr(b.project)
-      const eq   = irr(b.equity)
+      const proj = irr(b.projectIrr)
+      const eq   = irr(b.equityIrr)
       const scenRevenue = b.perYear.reduce((s, r) => s + r.revenue, 0)
       return {
         name,
